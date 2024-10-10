@@ -1,0 +1,264 @@
+<?php
+defined('BASEPATH') or exit('No direct script access allowed');
+
+class Role extends CI_Controller
+{
+
+    public function __construct()
+    {
+
+        parent::__construct();
+        $this->load->library('form_validation');
+        $this->db_keuangan = $this->load->database('keuangan', TRUE);
+        cekSessionLogin();
+        // admin_access();
+
+    }
+
+    // /////////////////////////////////////////////////////////////// list role ///////////////////////////////////////////////////////////////////
+    public function index()
+    {
+
+        $data['title'] = 'Role Akses';
+        $data['judul'] = 'Role | SIDE-BBI';
+
+        $data['user'] = $this->db_keuangan->get_where('karyawan', ['nik' => $this->session->userdata('nik')])->row_array();
+
+        // ambil role / menu
+        $this->db->select('*');
+        $this->db->from('role');
+        $data['role'] = $this->db->get()->result_array();
+
+        // Ambil data pada tabel 'sdm_menu'
+        $this->db->select('*');
+        $this->db->from('menu');
+        $data['menu'] = $this->db->get()->result_array();
+
+        // user validation 
+        $this->form_validation->set_rules('nama_role', 'Role', 'required|trim');
+
+        if ($this->form_validation->run() == false) {
+
+            $this->load->view('template/header', $data);
+            $this->load->view('template/sidebar', $data);
+            $this->load->view('admin/role/list-role', $data);
+            $this->load->view('template/footer');
+        } else {
+
+            $nama_role = $this->input->post('nama_role');
+
+            // cek ketersediaan 'nama_role'
+            $this->db->where('nama_role =', $nama_role);
+            $cek_role = $this->db->get('role');
+
+            if ($cek_role->num_rows() == 1) {
+
+                $this->session->set_flashdata('messageRole', '<div class="alert alert-danger" role="alert">Role sudah terdaftar!</div>');
+                redirect('role');
+            }
+
+            $kode_unik = sha1(time());
+
+            $data = [
+
+                'nama_role' => $nama_role,
+                'kode_unik' => $kode_unik
+
+            ];
+
+            $this->db->insert('role', $data);
+
+            $this->session->set_flashdata('messageRole', '<div class="alert alert-success" role="alert">Role berhasil ditambahkan!</div>');
+            redirect('role');
+        }
+    }
+    // /////////////////////////////////////////////////////////////// list role ///////////////////////////////////////////////////////////////////
+
+    // /////////////////////////////////////////////////////////////// edit role ///////////////////////////////////////////////////////////////////
+    public function edit($kode_unik)
+    {
+
+        $data['title'] = 'Role Akses';
+        $data['user'] = $this->db_keuangan->get_where('karyawan', ['nik' => $this->session->userdata('nik')])->row_array();
+
+        // Ambil data role berdasarkan 'kode_unik'
+        $this->db->select('*');
+        $this->db->from('role');
+        $this->db->where('kode_unik =', $kode_unik);
+        $data['role'] = $this->db->get()->row_array();
+
+        // Ambil akses menu berdasarkan 'id_role' pada tabel sdm_role_akses
+        $this->db->select('role_akses.*, nama_menu');
+        $this->db->from('role_akses');
+        $this->db->join('menu', 'role_akses.id_menu = menu.id_menu', 'left');
+        $this->db->where('role_akses.id_role =', $data['role']['id_role']);
+        $data['aksesMenu'] = $this->db->get()->result_array();
+
+        // Ambil data pada tabel 'sdm_menu'
+        $this->db->select('*');
+        $this->db->from('menu');
+        $data['menu'] = $this->db->get()->result_array();
+
+        // user validation 
+        $this->form_validation->set_rules('nama_role', 'Role Name', 'required|trim');
+
+        if ($this->form_validation->run() == false) {
+
+            $this->load->view('template/header', $data);
+            $this->load->view('template/sidebar', $data);
+            $this->load->view('admin/role/edit-role', $data);
+            $this->load->view('template/footer');
+        } else {
+
+            $id_role = $this->input->post('id_role');
+            $nama_role = $this->input->post('nama_role');
+            $id_menu = $this->input->post('id_menu[]');
+
+            if ($id_menu == NULL) {
+                // jika tidak memiliki akses menu sama sekali (0)
+                // hapus dari tabel 'sdm_role_akses' berdasarkan 'id_role'
+                $this->db->where('id_role =', $id_role);
+                $this->db->delete('role_akses');
+            }
+
+            // update tabel 'sdm_role'
+            $this->db->set('nama_role', $nama_role);
+            $this->db->where('kode_unik =', $kode_unik);
+            $this->db->update('role');
+
+            // update tabel 'sdm_role_akses' berdasarkan 'id_menu' dan 'id_role'
+            foreach ($id_menu as $im) {
+                // cek apakah ada 'id_role' pada tabel 'sdm_role_akses'
+                $this->db->select('*');
+                $this->db->from('role_akses');
+                $this->db->where('id_role =', $id_role);
+                $this->db->where('id_menu =', $im);
+                $cek = $this->db->get()->num_rows();
+
+                if ($cek == 0) {
+                    // jika tidak ada, insert ke tabel 'role_akses'
+                    $dataRA = [
+                        'id_role' => $id_role,
+                        'id_menu' => $im
+                    ];
+
+                    $this->db->insert('role_akses', $dataRA);
+                } else {
+                    // 'id_role' ada, tapi 'id_menu' tidak ada
+                    // hapus dari tabel 'sdm_role_akses' berdasarkan 'id_role' dan 'id_menu' != 'id_menu'
+                    $this->db->where('id_role =', $id_role);
+                    $this->db->where('id_menu !=', $im);
+                    $this->db->delete('role_akses');
+                }
+            }
+
+            $this->session->set_flashdata('messageRole', '<div class="alert alert-success" role="alert">Role berhasil diupdate!</div>');
+
+            redirect('role');
+        }
+    }
+    // /////////////////////////////////////////////////////////////// edit role ///////////////////////////////////////////////////////////////////
+
+    // /////////////////////////////////////////////////////////////// dokumen role ///////////////////////////////////////////////////////////////////
+    public function dokumen($kode_unik)
+    {
+        $data['title'] = 'Akses Dokumen';
+        $data['user'] = $this->db_keuangan->get_where('karyawan', ['nik' => $this->session->userdata('nik')])->row_array();
+
+        // Ambil data role berdasarkan 'kode_unik'
+        $this->db->select('*');
+        $this->db->from('role');
+        $this->db->where('kode_unik =', $kode_unik);
+        $data['role'] = $this->db->get()->row_array();
+
+        // Ambil akses dokumen berdasarkan 'id_role_user' pada tabel dokumen_akses
+        $this->db->select('dokumen_akses.*, nama_role');
+        $this->db->from('dokumen_akses');
+        $this->db->join('role', 'dokumen_akses.id_role_dokumen = role.id_role', 'left');
+        $this->db->where('dokumen_akses.id_role_user =', $data['role']['id_role']);
+        $data['aksesDokumen'] = $this->db->get()->result_array();
+
+        // Ambil data pada tabel 'role' kecuali admin, super admin dan dokon center
+        $this->db->select('*');
+        $this->db->from('role');
+        $this->db->where('nama_role !=', 'Admin');
+        $this->db->where('nama_role !=', 'Super Admin');
+        $this->db->where('nama_role !=', 'Dokon Center');
+        $data['list_role'] = $this->db->get()->result_array();
+
+        // user validation 
+        $this->form_validation->set_rules('nama_role', 'Role Name', 'required|trim');
+
+        if ($this->form_validation->run() == false) {
+            $this->load->view('template/header', $data);
+            $this->load->view('template/sidebar', $data);
+            $this->load->view('admin/role/edit-dokumen-role', $data);
+            $this->load->view('template/footer');
+        } else {
+
+            $id_role = $this->input->post('id_role');
+            $nama_role = $this->input->post('nama_role');
+            $id_dokumen_akses = $this->input->post('id_dokumen_akses[]');
+
+            if ($id_dokumen_akses == NULL) {
+                // jika tidak memiliki akses dokumen sama sekali (0)
+                // hapus dari tabel 'dokumen_akses' berdasarkan 'id_role'
+                $this->db->where('id_role_user =', $id_role);
+                $this->db->delete('dokumen_akses');
+            }
+
+            // update tabel 'dokumen_akses' berdasarkan 'id_role_dokumen' dan 'id_role_user'
+            foreach ($id_dokumen_akses as $ida) {
+                // cek apakah ada 'id_role_user' pada tabel 'dokumen_akses'
+                $this->db->select('*');
+                $this->db->from('dokumen_akses');
+                $this->db->where('id_role_user =', $id_role);
+                $this->db->where('id_role_dokumen =', $ida);
+                $cek = $this->db->get()->num_rows();
+
+                if ($cek == 0) {
+                    // jika tidak ada, insert ke tabel 'dokumen_akses'
+                    $dataDA = [
+                        'id_role_user' => $id_role,
+                        'id_role_dokumen' => $ida
+                    ];
+
+                    $this->db->insert('dokumen_akses', $dataDA);
+                } else {
+                    // 'id_role_user' ada, tapi 'id_role_dokumen' tidak ada
+                    // hapus dari tabel 'dokumen_akses' berdasarkan 'id_role_user' dan 'id_role_dokumen' != 'id_dokumen_akses'
+                    $this->db->where('id_role_user =', $id_role);
+                    $this->db->where('id_role_dokumen !=', $ida);
+                    $this->db->delete('dokumen_akses');
+                }
+            }
+
+            $this->session->set_flashdata('messageRole', '<div class="alert alert-success" role="alert">Role berhasil diupdate!</div>');
+
+            redirect('role');
+        }
+    }
+    // /////////////////////////////////////////////////////////////// dokumen role ///////////////////////////////////////////////////////////////////
+
+    // ////////////////////////////////////////////////////////////// hapus role ///////////////////////////////////////////////////////////////////
+    public function hapus($id_role)
+    {
+
+        // hapus pada tabel 'role' berdasarkan 'id_role'
+        $this->db->where('id_role =', $id_role);
+        $this->db->delete('role');
+
+        // hapus pada tabel 'role_akses' berdasarkan 'id_role'
+        $this->db->where('id_role =', $id_role);
+        $this->db->delete('role_akses');
+
+        $this->session->set_flashdata('messageRole', '<div class="alert alert-success" role="alert">Role berhasil dihapus!</div>');
+
+        redirect('role');
+    }
+    // ////////////////////////////////////////////////////////////// hapus role ///////////////////////////////////////////////////////////////////
+
+
+
+
+}
